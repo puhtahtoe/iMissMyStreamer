@@ -15,7 +15,7 @@ The easiest way to run your own instance is with [Docker](https://docker.com) us
 ```
 services:
   iMissMyStreamer:
-    image: aaaaaaaaaaaaaaa
+    image: ghcr.io/puhtahtoe/imissmystreamer:latest
     container_name: iMissMyStreamer
     restart: unless-stopped
     volumes:
