@@ -1,0 +1,390 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using System.Text.Json;
+@inject iMissMyStreamer.Services.Data.IDataService DataService
+@inject IConfiguration configuration
+@inject IWebHostEnvironment Env
+@inject IJSRuntime JS
+
+<PageTitle>I Miss @streamerShortName</PageTitle>
+
+<style>
+    html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    }
+
+    .status-container {
+    display: grid;
+    grid-template-rows: auto 1fr auto auto;
+    height: 100vh;
+    background-color: @backgroundColor;
+    color: @fontColor;
+    font-family: @fontFamily;
+    text-align: center;
+    }
+
+    a:link {
+    color: @linkColor;
+    }
+
+    a:visited {
+    color: @linkVisitedColor;
+    }
+
+    a:hover {
+    color: @linkHoverColor;
+    }
+
+    a:active {
+    color: @linkActiveColor;
+    }
+
+    .header-text {
+    font-size: 3rem;
+    margin-top: 2rem; /* Slightly lower to avoid crowding */
+    }
+
+    .main-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    }
+
+    .image {
+    max-width: 600px;
+    height: auto;
+    margin-bottom: 1rem;
+    }
+
+    .mid-text {
+    font-size: 2.5rem;
+    margin-top: 1rem;
+    }
+
+    .text {
+    font-size: 1.3rem;
+    margin-top: 0.5rem;
+    }
+
+    .footer-text {
+    font-size: 1.2rem;
+    margin-bottom: 0.5rem;
+    }
+
+    .footer-subtext {
+    font-size: 0.9rem;
+    }
+
+    .artist {
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+    }
+
+    footer {
+    font-size: 0.8rem;
+    margin-bottom: 1rem;
+    }
+
+    .vods-highlights {
+    font-size: 1.3rem;
+    margin-bottom: 2rem; /* Anchors at the bottom of top half */
+    }
+</style>
+
+<div class="status-container">
+
+    <div class="header-text">I Miss @streamerShortName</div>
+
+    <div class="main-content">
+        @if (!string.IsNullOrEmpty(imagePath))
+        {
+            // <a href="@streamerStreamURL">
+            //     <img src="@imagePath" alt="@altText" class="image" />
+            // </a>
+            <img src="@imagePath" alt="@altText" class="image" @onclick="ShuffleImageAsync" />
+            <div class="artist">
+                Art by <a href="@artistLink" target="_blank">@artistName</a>
+            </div>
+        }
+
+        @if (isLive)
+        {
+            @if (string.IsNullOrEmpty(streamerStreamURL))
+            {
+                <div class="mid-text">@streamTitle</div>
+            }
+            else
+            {
+                <div class="mid-text"><a href="@streamerStreamURL">@streamTitle</a></div>
+            }
+            <div class="text">@streamGame</div>
+        }
+        else
+        {
+            @if (showTimer)
+            {
+                <div id="timer-display" @ref="timerDiv">@lastStreamTime</div>
+            }
+        }
+    </div>
+
+    <div class="vods-highlights">
+        @if (!string.IsNullOrEmpty(streamerVODsURL) && !string.IsNullOrEmpty(streamerHighlightsURL))
+        {
+            <span><a href="@streamerVODsURL">VODs</a> | <a href="@streamerHighlightsURL"> Highlights </a></span>
+        }
+        else if (!string.IsNullOrEmpty(streamerVODsURL))
+        {
+            <span><a href="@streamerVODsURL">VODs</a></span>
+        }
+        else if (!string.IsNullOrEmpty(streamerHighlightsURL))
+        {
+            <span><a href="@streamerHighlightsURL">Highlights</a></span>
+        }
+    </div>
+
+    <div class="footer-text">
+        @if (!string.IsNullOrEmpty(streamerStreamURL))
+        {
+            <a href="@streamerStreamURL">@streamerName</a>
+        }
+        else
+        {
+            @streamerName
+        }
+    </div>
+
+    <footer>
+        <small>Source coming soon TM</small>
+        <br />
+        <small>Inspired by <a href="https://imissnimi.com">I Miss Nimi</a></small>
+        <br />
+        <small>Not affiliated with @streamerName</small>
+        @if (!string.IsNullOrEmpty(artistName))
+        {
+            <small> or @artistName</small>
+        }
+    </footer>
+
+</div>
+
+
+@code {
+    private string streamerName = "";
+    private string streamerShortName = "";
+    private string streamerStreamURL = "";
+    private string streamerVODsURL = "";
+    private string streamerHighlightsURL = "";
+
+    private string? backgroundColor = "";
+    private string? fontColor = "";
+    private string? fontFamily = "";
+
+    private string? linkColor = "";
+    private string? linkHoverColor = "";
+    private string? linkVisitedColor = "";
+    private string? linkActiveColor = "";
+
+
+    private bool isLive = true;
+    private bool showTimer = false;
+    private string streamTitle = "";
+    private string streamGame = "";
+
+    private string imagePath = "";
+    private string artistName = "";
+    private string artistLink = "";
+    private string altText = "";
+
+    private string currentStatus = "";
+    private string currentTitle = "";
+
+    private string imagesRoot = "/data/images";
+
+    private ElementReference timerDiv;
+    private DateTime lastStreamTime = DateTime.MinValue;
+
+
+    private bool initilizing = true;
+    protected override void OnInitialized()
+    {
+        UpdateStatus();
+        UpdateTitle();
+        UpdateGame();
+
+        DataService.OnStatusChanged += UpdateStatus;
+        DataService.OnTitleChanged += UpdateTitle;
+        DataService.OnGameChanged += UpdateGame;
+
+        initilizing = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Trigger JS only when the timer becomes visible
+        if (!isLive)
+        {
+            await JS.InvokeVoidAsync("startTimer", lastStreamTime.ToString("O"), streamerShortName);
+        }
+    }
+
+    private async void UpdateStatus()
+    {
+        var statusResult = DataService.GetStreamerStatus();
+        if (statusResult.gotData)
+        {
+            isLive = statusResult.isLive;
+        }
+        else
+        {
+            isLive = false;
+        }
+
+        LoadEnvVars();
+
+        if (!isLive)
+        {
+            var lastStreamResult = DataService.GetLastStreamTime();
+            if (lastStreamResult.gotData)
+            {
+                lastStreamTime = lastStreamResult.lastStreamTime;
+                showTimer = true;
+            }
+            else
+            {
+                showTimer = false;
+            }
+        }
+
+        await LoadImageAsync();
+
+        // InvokeAsync(LoadImageAsync);
+        if (!initilizing)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void UpdateTitle()
+    {
+        var titleResult = DataService.GetStreamTitle();
+        if (titleResult.gotData)
+        {
+            streamTitle = titleResult.streamTitle;
+
+            if (!initilizing)
+            {
+                InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private void UpdateGame()
+    {
+        var gameResult = DataService.GetStreamGame();
+        if (gameResult.gotData)
+        {
+            streamGame = gameResult.streamGame;
+
+            if (!initilizing)
+            {
+                InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private void LoadEnvVars()
+    {
+        streamerName = configuration["StreamerDisplayName"] ?? "";
+        if (string.IsNullOrEmpty(streamerName)) { streamerName = configuration["TwitchStreamerName"] ?? ""; }
+        streamerShortName = configuration["StreamerShortName"] ?? streamerName;
+        streamerStreamURL = configuration["StreamerStreamURL"] ?? "";
+        streamerVODsURL = configuration["StreamerVODsURL"] ?? "";
+        streamerHighlightsURL = configuration["StreamerHighlightsURL"] ?? "";
+
+
+        backgroundColor = configuration["BackgroundColor"];
+        if (string.IsNullOrEmpty(backgroundColor)) { backgroundColor = "#62ba62"; }
+
+        fontColor = configuration["FontColor"] ?? "#293F14";
+        if (string.IsNullOrEmpty(fontColor)) { fontColor = "#293F14"; }
+
+        fontFamily = configuration["FontFamily"] ?? "Arial, sans-serif";
+        if (string.IsNullOrEmpty(fontFamily)) { fontFamily = "Arial, sans-serif"; }
+
+        linkColor = configuration["LinkColor"] ?? "#293F14";
+        if (string.IsNullOrEmpty(linkColor)) { linkColor = "#293F14"; }
+
+        linkHoverColor = configuration["LinkHoverColor"] ?? "#293F14";
+        if (string.IsNullOrEmpty(linkHoverColor)) { linkHoverColor = "#293F14"; }
+
+        linkVisitedColor = configuration["LinkVisitedColor"] ?? "#293F14";
+        if (string.IsNullOrEmpty(linkVisitedColor)) { linkVisitedColor = "#293F14"; }
+
+        linkActiveColor = configuration["LinkActiveColor"] ?? "#293F14";
+        if (string.IsNullOrEmpty(linkActiveColor)) { linkActiveColor = "#293F14"; }
+    }
+
+    private async Task LoadImageAsync()
+    {
+        try
+        {
+            string folder = Path.Combine(imagesRoot, isLive ? "live" : "offline");
+            string manifestFile = Path.Combine(folder, "manifest.json");
+
+            #if DEBUG
+
+            manifestFile = Path.Combine(@"D:\imlMnt\images", isLive ? "live" : "offline", "manifest.json");
+            #endif
+
+            if (!File.Exists(manifestFile))
+            {
+                Console.WriteLine("Manifest not found: " + manifestFile);
+                return;
+            }
+
+            var json = await File.ReadAllTextAsync(manifestFile);
+            var images = JsonSerializer.Deserialize<List<ImageInfo>>(json);
+
+            if (images?.Count > 0)
+            {
+                var random = new Random();
+                var selected = images[random.Next(images.Count)];
+
+                imagePath = Path.Combine(folder, selected.FileName);
+                artistName = selected.ArtistName;
+                artistLink = selected.ArtistLink;
+                altText = selected.AltText;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Error loading image manifest: " + ex.Message);
+        }
+    }
+
+    private async Task ShuffleImageAsync()
+    {
+        await LoadImageAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        DataService.OnStatusChanged -= UpdateStatus;
+        DataService.OnTitleChanged -= UpdateTitle;
+        DataService.OnGameChanged -= UpdateGame;
+    }
+
+    public class ImageInfo
+    {
+        public string FileName { get; set; } = "";
+        public string ArtistName { get; set; } = "";
+        public string ArtistLink { get; set; } = "";
+        public string AltText { get; set; } = "";
+    }
+}

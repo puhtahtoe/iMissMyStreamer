@@ -1,0 +1,136 @@
+﻿@page "/Debug"
+@rendermode InteractiveServer
+@inject iMissMyStreamer.Services.Data.IDataService DataService
+@inject IConfiguration configuration
+@inject IWebHostEnvironment Environment
+@inject NavigationManager NavMan
+
+<h3>debug</h3>
+
+<button @onclick="NewStatus">@liveButtonText</button>
+<br />
+<input @bind="streamGame" /> <button @onclick="NewGame">Set Game</button>
+<br />
+<input @bind="streamTitle" /> <button @onclick="NewTitle">Set Title</button>
+
+@code {
+    private bool isLive;
+    private string streamGame = "";
+    private string streamTitle = "";
+
+    private string liveButtonText = "";
+
+    protected override void OnInitialized()
+    {
+        if (!Environment.IsDevelopment() && (configuration["debug"] is null || !configuration.GetValue<bool>("debug")))
+    {
+            NavMan.NavigateTo("/");
+            return;
+        }
+
+        var getLive = DataService.GetStreamerStatus();
+        if (getLive.gotData)
+        {
+            isLive = getLive.isLive;
+            liveButtonText = "live";
+        }
+        else
+        {
+            isLive = false;
+            liveButtonText = "offline";
+        }
+
+        var getGame = DataService.GetStreamGame();
+        if (getGame.gotData)
+        {
+            streamGame = getGame.streamGame;
+        }
+        else
+        {
+            streamGame = "";
+        }
+
+        var getTitle = DataService.GetStreamTitle();
+        if (getTitle.gotData)
+        {
+            streamTitle = getTitle.streamTitle;
+        }
+        else
+        {
+            streamTitle = "";
+        }
+
+        DataService.OnStatusChanged += UpdateStatus;
+        DataService.OnTitleChanged += UpdateTitle;
+        DataService.OnGameChanged += UpdateGame;
+    }
+
+    private async void UpdateStatus()
+    {
+        var statusResult = DataService.GetStreamerStatus();
+        if (statusResult.gotData)
+        {
+            isLive = statusResult.isLive;
+            liveButtonText = "live";
+        }
+        else
+        {
+            isLive = false;
+        }
+
+        if (isLive)
+        {
+            liveButtonText = "live";
+        }
+        else
+        {
+            liveButtonText = "offline";
+        }
+
+        // InvokeAsync(LoadImageAsync);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void UpdateTitle()
+    {
+        var titleResult = DataService.GetStreamTitle();
+        if (titleResult.gotData)
+        {
+            streamTitle = titleResult.streamTitle;
+
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void UpdateGame()
+    {
+        var gameResult = DataService.GetStreamGame();
+        if (gameResult.gotData)
+        {
+            streamGame = gameResult.streamGame;
+
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void NewStatus()
+    {
+        isLive = !isLive;
+
+        if (!isLive)
+        {
+            DataService.SetLastStreamTime(DateTime.UtcNow);
+        }
+        DataService.SetStreamerStatus(isLive);
+    }
+
+    private void NewTitle()
+    {
+        DataService.SetStreamTitle(streamTitle);
+    }
+
+    private void NewGame()
+    {
+        DataService.SetStreamGame(streamGame);
+    }
+}
