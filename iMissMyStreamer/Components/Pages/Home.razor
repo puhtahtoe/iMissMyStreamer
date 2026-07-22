@@ -1,0 +1,568 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using System.Text.Json;
+@using System.Net;
+@inject iMissMyStreamer.Services.Data.IDataService DataService
+@inject IConfiguration configuration
+@inject IWebHostEnvironment Env
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>I Miss @streamerShortName</PageTitle>
+
+<style>
+    html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    }
+
+    .status-container {
+        display: grid;
+        grid-template-rows: @gridTemplateRows;
+        height: 100vh;
+        background-color: @backgroundColor;
+        color: @fontColor;
+        font-family: @fontFamily;
+        text-align: center;
+    }
+
+    a:link {
+    color: @linkColor;
+    }
+
+    a:visited {
+    color: @linkVisitedColor;
+    }
+
+    a:hover {
+    color: @linkHoverColor;
+    }
+
+    a:active {
+    color: @linkActiveColor;
+    }
+
+    .header-text {
+    font-size: 3rem;
+    margin-top: 2rem;
+    }
+
+    .main-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    }
+
+    .image {
+    max-width: 600px;
+    height: auto;
+    margin-bottom: 1rem;
+    }
+
+    .mid-text {
+    font-size: 2.5rem;
+    margin-top: 1rem;
+    }
+
+    .text {
+    font-size: 1.3rem;
+    margin-top: 0.5rem;
+    }
+
+    .footer-text {
+    font-size: 1.2rem;
+    margin-bottom: 0.5rem;
+    }
+
+    .footer-subtext {
+    font-size: 0.9rem;
+    }
+
+    .artist {
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+    }
+
+    footer {
+    font-size: 0.8rem;
+    margin-bottom: 1rem;
+    }
+
+    .vods-highlights {
+    font-size: 1.3rem;
+    margin-bottom: 2rem;
+    }
+
+    .clip-scroller {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 1rem;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding-left: 3rem;
+        padding-right: 3rem;
+        padding-bottom: 1rem;
+        margin-bottom: 1.5rem;
+        scroll-snap-type: x mandatory;
+        min-width: 0;
+        max-width: 100%;
+        scrollbar-width: thin;
+        scrollbar-color: @scrollbarColor transparent;
+        -webkit-overflow-scrolling: touch;
+    }
+        /* WebKit browsers: Chrome, Edge, Safari, most Chromium */
+        .clip-scroller::-webkit-scrollbar {
+            height: 15px;
+        }
+
+        .clip-scroller::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .clip-scroller::-webkit-scrollbar-thumb {
+            background: @scrollbarColor;
+            border-radius: 5px;
+        }
+
+    .clip-item {
+        flex: 0 0 auto;
+        scroll-snap-align: start;
+    }
+
+    .clip-card {
+        width: 640px;
+        text-decoration: none;
+        color: inherit;
+        display: flex;
+        flex-direction: column;
+        border-radius: 8px;
+        overflow: hidden;
+        transition: transform 0.15s ease;
+    }
+
+        .clip-card:hover {
+            transform: scale(1.03);
+        }
+
+    .clip-thumb {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        background: rgba(0, 0, 0, 0.2);
+    }
+
+        .clip-thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+    .clip-play {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 2.5rem;
+        color: white;
+        opacity: 0.85;
+        text-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+        pointer-events: none;
+    }
+
+    .clip-title {
+        font-size: 1rem;
+        font-weight: bold;
+        margin-top: 0.5rem;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-align: left;
+        padding: 0 0.25rem;
+    }
+
+    .clip-creator {
+        font-size: 0.85rem;
+        opacity: 0.8;
+        text-align: left;
+        padding: 0 0.25rem;
+        margin-bottom: 0.5rem;
+    }
+</style>
+
+<div class="status-container">
+
+    <div class="header-text">I Miss @streamerShortName</div>
+
+    <div class="main-content">
+        @if (!string.IsNullOrEmpty(imagePath))
+        {
+            <img src="@imagePath" alt="@altText" class="image" @onclick="ShuffleImageAsync" />
+            <div class="artist">
+                Art by <a href="@artistLink" target="_blank">@artistName</a>
+            </div>
+        }
+
+        @if (isLive)
+        {
+            @if (string.IsNullOrEmpty(streamerStreamURL))
+            {
+                <div class="mid-text">@streamTitle</div>
+            }
+            else
+            {
+                <div class="mid-text"><a href="@streamerStreamURL">@streamTitle</a></div>
+            }
+            <div class="text">@streamGame</div>
+        }
+        else
+        {
+            @if (showTimer)
+            {
+                <div id="timer-display" @ref="timerDiv">@lastStreamTime</div>
+            }
+        }
+    </div>
+
+    @if (ShowFeaturedClips && FeaturedClips.Count > 0 && (!OnlyShowClipsWhenOffline || !isLive))
+    {
+        <div class="clip-scroller">
+            @foreach (var clip in FeaturedClips)
+            {
+                <a class="clip-item clip-card" href="@clip.Url" target="_blank" rel="noopener noreferrer">
+                    <div class="clip-thumb">
+                        <img src="@ResizeThumb(clip.ThumbnailUrl)" alt="@clip.Title" loading="lazy" />
+                        <div class="clip-play">▶</div>
+                    </div>
+                    <div class="clip-title">@clip.Title</div>
+                    <div class="clip-creator">@clip.CreatorName</div>
+                </a>
+            }
+        </div>
+    }
+
+    <div class="vods-highlights">
+        @if (!string.IsNullOrEmpty(streamerVODsURL) && !string.IsNullOrEmpty(streamerHighlightsURL))
+        {
+            <span><a href="@streamerVODsURL">VODs</a> | <a href="@streamerHighlightsURL"> Highlights </a></span>
+        }
+        else if (!string.IsNullOrEmpty(streamerVODsURL))
+        {
+            <span><a href="@streamerVODsURL">VODs</a></span>
+        }
+        else if (!string.IsNullOrEmpty(streamerHighlightsURL))
+        {
+            <span><a href="@streamerHighlightsURL">Highlights</a></span>
+        }
+    </div>
+
+    <div class="footer-text">
+        @if (!string.IsNullOrEmpty(streamerStreamURL))
+        {
+            <a href="@streamerStreamURL">@streamerName</a>
+        }
+        else
+        {
+            @streamerName
+        }
+    </div>
+
+    <footer>
+        <small>Not affiliated with @streamerName</small>
+        @if (!string.IsNullOrEmpty(artistName))
+        {
+            <small> or @artistName</small>
+        }
+        <br />
+        <small>Inspired by <a href="https://imissnimi.com">I Miss Nimi</a></small>
+        <br />
+        <small><a href="https://github.com/puhtahtoe/iMissMyStreamer">Source</a></small>
+    </footer>
+
+</div>
+
+
+@code {
+    private string parentDomain = "";
+    private string gridTemplateRows = "auto auto 1fr auto auto auto";
+    private string streamerName = "";
+    private string streamerShortName = "";
+    private string streamerStreamURL = "";
+    private string streamerVODsURL = "";
+    private string streamerHighlightsURL = "";
+
+    private string? backgroundColor = "";
+    private string? fontColor = "";
+    private string? fontFamily = "";
+
+    private string? linkColor = "";
+    private string? linkHoverColor = "";
+    private string? linkVisitedColor = "";
+    private string? linkActiveColor = "";
+
+    private string scrollbarColor = "";
+
+
+    private bool isLive = true;
+    private bool showTimer = false;
+    private string streamTitle = "";
+    private string streamGame = "";
+
+    private string imagePath = "";
+    private string artistName = "";
+    private string artistLink = "";
+    private string altText = "";
+
+    private string currentStatus = "";
+    private string currentTitle = "";
+
+    private string imagesRoot = "/data/images";
+
+    private ElementReference timerDiv;
+    private DateTime lastStreamTime = DateTime.MinValue;
+
+    private bool ShowFeaturedClips = false;
+    private bool OnlyShowClipsWhenOffline = false;
+    private List<TwitchClip> FeaturedClips = new List<TwitchClip>();
+    private double ClipThumbSizeMultiplier = 2;
+    private int ClipCardWidth = 320;
+
+
+
+    private bool initilizing = true;
+    protected override void OnInitialized()
+    {
+        parentDomain = new Uri(Nav.BaseUri).Host;
+
+        LoadEnvVars();
+
+        UpdateFeaturedClips();
+        UpdateStatus();
+        UpdateTitle();
+        UpdateGame();
+
+        DataService.OnStatusChanged += UpdateStatus;
+        DataService.OnTitleChanged += UpdateTitle;
+        DataService.OnGameChanged += UpdateGame;
+
+        initilizing = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Trigger JS only when the timer becomes visible
+        if (!isLive)
+        {
+            await JS.InvokeVoidAsync("startTimer", lastStreamTime.ToString("O"), streamerShortName);
+        }
+    }
+
+    private async void UpdateStatus()
+    {
+        var statusResult = DataService.GetStreamerStatus();
+        if (statusResult.gotData)
+        {
+            isLive = statusResult.isLive;
+        }
+        else
+        {
+            isLive = false;
+        }
+
+        
+
+        if (ShowFeaturedClips && FeaturedClips.Count > 0 && (!OnlyShowClipsWhenOffline || !isLive))
+        {
+            gridTemplateRows = "auto auto 1fr auto auto auto";
+        }
+        else
+        {
+            gridTemplateRows = "auto 1fr auto auto auto";
+        }
+
+        if (!isLive)
+        {
+            var lastStreamResult = DataService.GetLastStreamTime();
+            if (lastStreamResult.gotData)
+            {
+                lastStreamTime = lastStreamResult.lastStreamTime;
+                showTimer = true;
+            }
+            else
+            {
+                showTimer = false;
+            }
+        }
+
+        await LoadImageAsync();
+
+        // InvokeAsync(LoadImageAsync);
+        if (!initilizing)
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void UpdateTitle()
+    {
+        var titleResult = DataService.GetStreamTitle();
+        if (titleResult.gotData)
+        {
+            streamTitle = titleResult.streamTitle;
+
+            if (!initilizing)
+            {
+                InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private void UpdateGame()
+    {
+        var gameResult = DataService.GetStreamGame();
+        if (gameResult.gotData)
+        {
+            streamGame = gameResult.streamGame;
+
+            if (!initilizing)
+            {
+                InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private void UpdateFeaturedClips()
+    {
+        var clipsResult = DataService.GetFeaturedClips();
+        if (clipsResult.gotData)
+        {
+            FeaturedClips = JsonSerializer.Deserialize<List<TwitchClip>>(clipsResult.featuredClips) ?? new List<TwitchClip>();
+
+            if (!initilizing)
+            {
+                InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private void LoadEnvVars()
+    {
+        streamerName = configuration["StreamerDisplayName"] ?? "";
+        if (string.IsNullOrEmpty(streamerName)) { streamerName = configuration["TwitchStreamerName"] ?? ""; }
+        streamerShortName = configuration["StreamerShortName"] ?? streamerName;
+        streamerStreamURL = configuration["StreamerStreamURL"] ?? "";
+        streamerVODsURL = configuration["StreamerVODsURL"] ?? "";
+        streamerHighlightsURL = configuration["StreamerHighlightsURL"] ?? "";
+
+
+        backgroundColor = configuration["BackgroundColor"];
+        if (string.IsNullOrEmpty(backgroundColor)) { backgroundColor = "#62ba62"; }
+
+        fontColor = configuration["FontColor"] ?? "#293F14";
+        if (string.IsNullOrEmpty(fontColor)) { fontColor = "#293F14"; }
+
+        fontFamily = configuration["FontFamily"] ?? "Arial, sans-serif";
+        if (string.IsNullOrEmpty(fontFamily)) { fontFamily = "Arial, sans-serif"; }
+
+        linkColor = configuration["LinkColor"] ?? "#293F14";
+        if (string.IsNullOrEmpty(linkColor)) { linkColor = "#293F14"; }
+
+        linkHoverColor = configuration["LinkHoverColor"] ?? "#293F14";
+        if (string.IsNullOrEmpty(linkHoverColor)) { linkHoverColor = "#293F14"; }
+
+        linkVisitedColor = configuration["LinkVisitedColor"] ?? "#293F14";
+        if (string.IsNullOrEmpty(linkVisitedColor)) { linkVisitedColor = "#293F14"; }
+
+        linkActiveColor = configuration["LinkActiveColor"] ?? "#293F14";
+        if (string.IsNullOrEmpty(linkActiveColor)) { linkActiveColor = "#293F14"; }
+
+        scrollbarColor = configuration["ScrollbarColor"] ?? "#293F14";
+        if (string.IsNullOrEmpty(scrollbarColor)) { scrollbarColor = fontColor; }
+
+        ShowFeaturedClips = configuration.GetValue<bool?>("ShowFeaturedClips") ?? false;
+        OnlyShowClipsWhenOffline = configuration.GetValue<bool?>("OnlyShowClipsWhenOffline") ?? false;
+
+        if (!ShowFeaturedClips)
+        {
+            gridTemplateRows = "auto 1fr auto auto auto";
+        }
+
+        ClipThumbSizeMultiplier = configuration.GetValue<double?>("ClipThumbSizeMultiplier") ?? 1.0;
+
+        ClipCardWidth = (int)(ClipCardWidth * ClipThumbSizeMultiplier);
+    }
+
+    private async Task LoadImageAsync()
+    {
+        try
+        {
+            string folder = Path.Combine(imagesRoot, isLive ? "live" : "offline");
+            string manifestFile = Path.Combine(folder, "manifest.json");
+
+#if DEBUG
+
+            manifestFile = Path.Combine(@"D:\imlMnt\images", isLive ? "live" : "offline", "manifest.json");
+#endif
+
+            if (!File.Exists(manifestFile))
+            {
+                Console.WriteLine("Manifest not found: " + manifestFile);
+                return;
+            }
+
+            var json = await File.ReadAllTextAsync(manifestFile);
+            var images = JsonSerializer.Deserialize<List<ImageInfo>>(json);
+
+            if (images?.Count > 0)
+            {
+                var random = new Random();
+                var selected = images[random.Next(images.Count)];
+
+                imagePath = Path.Combine(folder, selected.FileName);
+                artistName = selected.ArtistName;
+                artistLink = selected.ArtistLink;
+                altText = selected.AltText;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("Error loading image manifest: " + ex.Message);
+        }
+    }
+
+    private async Task ShuffleImageAsync()
+    {
+        await LoadImageAsync();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        DataService.OnStatusChanged -= UpdateStatus;
+        DataService.OnTitleChanged -= UpdateTitle;
+        DataService.OnGameChanged -= UpdateGame;
+    }
+
+    public class ImageInfo
+    {
+        public string FileName { get; set; } = "";
+        public string ArtistName { get; set; } = "";
+        public string ArtistLink { get; set; } = "";
+        public string AltText { get; set; } = "";
+    }
+    private string ResizeThumb(string thumbnailUrl)
+    {
+        int newWidth = (int)Math.Floor(480 * ClipThumbSizeMultiplier);
+        int newHeight = (int)Math.Floor(270 * ClipThumbSizeMultiplier);
+
+        string newThumb = thumbnailUrl.Replace("480", newWidth.ToString())
+                                      .Replace("272", newHeight.ToString());
+
+        return newThumb;
+    }
+}
